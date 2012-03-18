@@ -50,7 +50,6 @@ static void initHardware (void);
 static void button_isr(void);
 static void abdac_isr(void);
 
-
 void sound0(void);
 void sound1(void);
 void sound2(void);
@@ -63,4 +62,7 @@ void silence(void);
 
 void activate_sound(int sound);
 short render_sample(void);
+
+void clear_leds(void);
+void set_active_led(int led);
 #endif

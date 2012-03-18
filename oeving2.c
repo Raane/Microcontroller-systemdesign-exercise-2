@@ -2,15 +2,13 @@
  * 
  * Øving 2 UCSysDes
  *
+ * Authors: Rune Holmgren & Sigve Sebastian Farstad
+ *
  *****************************************************************************/
 
 #include <stdlib.h>
 #include <math.h>
 #include "oeving2.h"
-
-
-int lead[LEAD_LENGTH];
-int bass[BASS_LENGTH];
 
 volatile avr32_pio_t *piob = &AVR32_PIOB;
 volatile avr32_pio_t *pioc = &AVR32_PIOC;
@@ -21,69 +19,47 @@ int selected;
 float volume = 1.f;
 
 short sin_tab[1024];
-int lead_period_tracker = 0;
-int lead_note_tracker = 0;
-int bass_period_tracker = 0;
-int bass_note_tracker = 0;
-int pitch = 256;
-int t;
-int last_known_button_state;
 short sample;
 
 void (*sounds[9])(void) = {sound0, sound1, sound2, sound3, sound4, sound5, sound6, sound7, silence};
 
+int lead[LEAD_LENGTH];
+int bass[BASS_LENGTH];
+int lead_period_tracker = 0;
+int lead_note_tracker = 0;
+int bass_period_tracker = 0;
+int bass_note_tracker = 0;
 /* since our note data is so short, we can just keep it here :) */
 const char* bass_input = "BBNNDDPPAAMMFFRR??KKDDPP==II==II";
 const char* lead_input = "hhjjdeeadca\0aaccd\0dcacehjehceacaeehhjehceadedcacddacehcdcaccaacchhjjdeeadca\0aaccd\0dcacehjehceacaeehhjehceadedcacddacehcdcacca\0a\0aa\\^aa\\^aceafefha\0aa\\^a\\feca\\YZ\\aa\\^aa\\^aacea\\^\\a\0a`a\\^afefhaa``aa\\^aa\\^aceafefha\0aa\\^a\\feca\\YZ\\aa\\^aa\\^aacea\\^\\a\0a`a\\^afefhaacc";
 
+int t = 0;
 
-short render_sample(void){
-    //two lines were faster than one
-    sample = lead_period_tracker<lead[lead_note_tracker]*0.5f?10000:-10000;
-    sample += bass_period_tracker<bass[bass_note_tracker]*0.5f?10000:-10000;
-    t++;
-    lead_period_tracker++;
-    bass_period_tracker++;
-    if(t>TICK_LENGTH){
-        t=1;
-        lead_note_tracker++;
-        bass_note_tracker++;
-    }
-    /* if we reack the end of the track, repeat */
-    if(lead_note_tracker >  LEAD_LENGTH-1){
-        lead_note_tracker = 0;
-    }
-    if(bass_note_tracker > BASS_LENGTH-1){
-        bass_note_tracker = 0;
-    }
+int last_known_button_state = 0;
 
-    /* if we reach the end of period designated by the lead and bass frequency tables, repeat */
-    if(lead_period_tracker > lead[lead_note_tracker]){
-        lead_period_tracker = 0;
-    }
-    if(bass_period_tracker > bass[bass_note_tracker]){
-        bass_period_tracker = 0;
-    }
-    return sample;
-}
+
 
 int main (int argc, char *argv[]) {
+
     int i;
     /* pre-render some tables */
-	for(i=0;i<1024;i++) { //a sine table
+    //a sine table
+	for(i=0;i<1024;i++) {
 		sin_tab[i] = sin(M_PI/1024*i)*10000;
 	}	
-    for(i=0;i<LEAD_LENGTH;i++){ //the frequency table for the lead voice
+    //the frequency table for the lead voice
+    for(i=0;i<LEAD_LENGTH;i++){
         lead[i] = 12000.f/(440*pow(2,(lead_input[i]-112)/12.f));
     }
-    for(i=0;i<BASS_LENGTH;i++){ //the frequency table for the bass voice
+    //the frequency table for the bass voice
+    for(i=0;i<BASS_LENGTH;i++){ 
         bass[i] = 12000.f/(440*pow(2,(bass_input[i]-112)/12.f));
     }
+
     activate_sound(SND_SILENCE); //silence from the start
-    last_known_button_state = 0x00;		
     initHardware(); //init the hardware as late as possible
-    while(1);
-    return 0;
+    while(1); //main chillaxing loop :D
+    return EXIT_SUCCESS;
 }
 
 void initHardware (void) {
@@ -111,9 +87,7 @@ void initLeds(void) {
     piob->oer = 0xFF;
 }
 
-
 void initAudio(void) {
-
     register_interrupt( abdac_isr, AVR32_ABDAC_IRQ/32, AVR32_ABDAC_IRQ % 32, ABDAC_INT_LEVEL);
 
     piob->PDR.p20 = 1;
@@ -131,20 +105,26 @@ void initAudio(void) {
     abdac->IER.tx_ready = 1;
 }
 
+void clear_leds(void){
+    piob->codr = 0xFF;
+}
+
+void set_active_led(int led){
+    piob->sodr = pow(2,led); //set the active led
+}
 
 void activate_sound(int sound){
     volume = 1.0f;
     selected = sound;
-    piob->codr = 0xFF; //clear leds
+    clear_leds();
     if(sound != SND_SILENCE){
-        piob->sodr = pow(2,selected); //set the active led
-    }else{
+        set_active_led(selected);
     }
 }
 
 void button_isr(void) {
     pioc->isr; //reset interupt
-    piob->codr = 0xFF; //clear leds
+    clear_leds();
 
 
     int button_state = pioc->pdsr;
@@ -191,8 +171,8 @@ void button_isr(void) {
 			activate_sound(SND_DEATH);
 			break;
 	}
-    piob->sodr = pow(2,selected);
-    return ;
+    set_active_led(selected);
+    return;
 }
 
 void abdac_isr(void) {
@@ -204,56 +184,56 @@ void abdac_isr(void) {
 }
 
 void sound0(void){
-    short sample = (t*1024)%(2048*2048)<<(t/2000);
+    sample = (t*1024)%(4194304)<<(t/2000);
     abdac->SDR.channel0 = volume*sample;
     abdac->SDR.channel1 = volume*sample;
     t--;
-    return ;
+    return;
 }
 void sound1(void){
 
-    short sample = t&0x80?10000:-10000;
+    sample = t&0x80?10000:-10000;
     abdac->SDR.channel0 = (short)(volume*sample);
     abdac->SDR.channel1 = (short)(volume*sample);
     t--;
     volume = t&0x800?1:0;
-    return ;
+    return;
 }
 void sound2(void){
-    short sample = 10000*(t%(t/(t>>9|t>>13)));
-    abdac->SDR.channel0 = (short)(volume*sample);
-    abdac->SDR.channel1 = (short)(volume*sample);
+    sample = 10000*(t%(t/(t>>9|t>>13))); //tribute to xpansive at pouet.net
+    abdac->SDR.channel0 = sample;
+    abdac->SDR.channel1 = sample;
     t--;
-    return ;
+    return;
 }
 void sound3(void){
     abdac->SDR.channel0 = rand();
     abdac->SDR.channel1 = rand();
     t--;
-    return ;
+    return;
 }
 void sound4(void){
-    short sample = render_sample();
+    sample = render_sample();
     abdac->SDR.channel0 = sample;
     abdac->SDR.channel1 = sample;
-    return ;
+    return;
 }
 void sound5(void){
     int bouncer1 = ((60000-t)/(8+(60000-t)/300)%2)*2-1;
     int bouncer2 = ((60000-t)/(64+t/6000)%4)*2-1;
-    short sample = bouncer1*4000 + bouncer2*4000;
+    sample = bouncer1*4000 + bouncer2*4000;
     abdac->SDR.channel0 = sample;
     abdac->SDR.channel1 = sample;
     t--;
-    return ;
+    return;
 }
 void sound6(void){
-	short sample = sin_tab[((t/1000)*(60000-t))%1024] + sin_tab[((t/1000)*(60000-t)+256)%1024] + sin_tab[((60000-t)/1000)%1024] ; 
+	sample = sin_tab[((t/1000)*(60000-t))%1024] + sin_tab[((t/1000)*(60000-t)+256)%1024] + sin_tab[((60000-t)/1000)%1024] ; 
 	abdac->SDR.channel0 = sample;
 	abdac->SDR.channel1 = sample;
 	t--;	
 
-    return ;
+    return;
 }
 void sound7(void){
 	int tp = 50000 - t;
@@ -262,13 +242,38 @@ void sound7(void){
 	abdac->SDR.channel0 = sample;
 	abdac->SDR.channel1 = sample;
 	t--;	
-    return ;
+    return;
 }
 void silence(void){
-    /*
-    short sample = 1;
-	abdac->SDR.channel0 = sample;
-	abdac->SDR.channel1 = sample;
-    */
     return;
+}
+
+short render_sample(void){
+    //two lines were faster than one
+    sample = lead_period_tracker<lead[lead_note_tracker]*0.5f?10000:-10000;
+    sample += bass_period_tracker<bass[bass_note_tracker]*0.5f?10000:-10000;
+    t++;
+    lead_period_tracker++;
+    bass_period_tracker++;
+    if(t>TICK_LENGTH){
+        t=1;
+        lead_note_tracker++;
+        bass_note_tracker++;
+    }
+    /* if we reack the end of the track, repeat */
+    if(lead_note_tracker >  LEAD_LENGTH-1){
+        lead_note_tracker = 0;
+    }
+    if(bass_note_tracker > BASS_LENGTH-1){
+        bass_note_tracker = 0;
+    }
+
+    /* if we reach the end of period designated by the lead and bass frequency tables, repeat */
+    if(lead_period_tracker > lead[lead_note_tracker]){
+        lead_period_tracker = 0;
+    }
+    if(bass_period_tracker > bass[bass_note_tracker]){
+        bass_period_tracker = 0;
+    }
+    return sample;
 }
