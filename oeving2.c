@@ -44,9 +44,9 @@ int main (int argc, char *argv[]) {
     int i;
     /* pre-render some tables */
     //a sine table
-	for(i=0;i<1024;i++) {
-		sin_tab[i] = sin(M_PI/1024*i)*10000;
-	}	
+    for(i=0;i<1024;i++) {
+        sin_tab[i] = sin(M_PI/1024*i)*10000;
+    }	
     //the frequency table for the lead voice
     for(i=0;i<LEAD_LENGTH;i++){
         lead[i] = 12000.f/(440*pow(2,(lead_input[i]-112)/12.f));
@@ -133,24 +133,24 @@ void button_isr(void) {
     button_pushed = button_pushed&button_state;
     last_known_button_state = button_state;
 
-	switch(button_pushed){
-		case SW0:
+    switch(button_pushed){
+        case SW0:
             t = 20000;
-			activate_sound(SND_COIN);
-			break;
-		case SW1:
+            activate_sound(SND_COIN);
+            break;
+        case SW1:
             t = 20000;
-			activate_sound(SND_MACHINEGUN);
-			break;
-		case SW2:
+            activate_sound(SND_MACHINEGUN);
+            break;
+        case SW2:
             t = 20000;
-			activate_sound(SND_POWERUP);
-			break;
-		case SW3:
+            activate_sound(SND_POWERUP);
+            break;
+        case SW3:
             t = 20000;
-			activate_sound(SND_NOISE);
-			break;
-		case SW4:
+            activate_sound(SND_NOISE);
+            break;
+        case SW4:
             t = 1; 
             lead_period_tracker = 0;
             bass_period_tracker = 0;
@@ -160,17 +160,17 @@ void button_isr(void) {
             break;
         case SW5:
             t = 20000;
-			activate_sound(SND_MONSTER);
-			break;
-		case SW6:
-			t=60000;
-			activate_sound(SND_GAME_OVER);
-			break;
-		case SW7:
-			t=50000;
-			activate_sound(SND_DEATH);
-			break;
-	}
+            activate_sound(SND_MONSTER);
+            break;
+        case SW6:
+            t=60000;
+            activate_sound(SND_GAME_OVER);
+            break;
+        case SW7:
+            t=50000;
+            activate_sound(SND_DEATH);
+            break;
+    }
     set_active_led(selected);
     return;
 }
@@ -228,20 +228,20 @@ void sound5(void){
     return;
 }
 void sound6(void){
-	sample = sin_tab[((t/1000)*(60000-t))%1024] + sin_tab[((t/1000)*(60000-t)+256)%1024] + sin_tab[((60000-t)/1000)%1024] ; 
-	abdac->SDR.channel0 = sample;
-	abdac->SDR.channel1 = sample;
-	t--;	
+    sample = sin_tab[((t/1000)*(60000-t))%1024] + sin_tab[((t/1000)*(60000-t)+256)%1024] + sin_tab[((60000-t)/1000)%1024] ; 
+    abdac->SDR.channel0 = sample;
+    abdac->SDR.channel1 = sample;
+    t--;	
 
     return;
 }
 void sound7(void){
-	int tp = 50000 - t;
-	short sample = sin_tab[((4+tp/300)*tp)%1024] + sin_tab[(((4000+tp/300)*tp))%1024];
-	if(tp > 45000) sample = sample*(50000-tp)/5000;
-	abdac->SDR.channel0 = sample;
-	abdac->SDR.channel1 = sample;
-	t--;	
+    int tp = 50000 - t;
+    short sample = sin_tab[((4+tp/300)*tp)%1024] + sin_tab[(((4000+tp/300)*tp))%1024];
+    if(tp > 45000) sample = sample*(50000-tp)/5000;
+    abdac->SDR.channel0 = sample;
+    abdac->SDR.channel1 = sample;
+    t--;	
     return;
 }
 void silence(void){
