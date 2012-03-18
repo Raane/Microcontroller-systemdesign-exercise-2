@@ -4,8 +4,15 @@
  *
  *****************************************************************************/
 
-#include "oeving2.h"
+#include <stdlib.h>
 #include <math.h>
+#include "oeving2.h"
+
+#define SILENCE_HACK 2000
+
+
+int lead[LEAD_LENGTH];
+int bass[BASS_LENGTH];
 
 volatile avr32_pio_t *piob = &AVR32_PIOB;
 volatile avr32_pio_t *pioc = &AVR32_PIOC;
@@ -15,71 +22,72 @@ volatile avr32_pm_t *pm = &AVR32_PM;
 int selected;
 float volume = 1.f;
 
-int v = 0;
 short sin_tab[1024];
-int u = 0;
-int v_2 = 0;
-int u_2 = 0;
+int lead_period_tracker = 0;
+int lead_note_tracker = 0;
+int bass_period_tracker = 0;
+int bass_note_tracker = 0;
 int pitch = 256;
 int t;
 int last_known_button_state;
 short sample;
 
-#define BASS_LENGTH 32
-#define LEAD_LENGTH 256
-#define TICK_LENGTH 4000
+void (*sounds[9])(void) = {sound0, sound1, sound2, sound3, sound4, sound5, sound6, sound7, silence};
 
-int lead[LEAD_LENGTH];
-int bass[BASS_LENGTH];
+/* since our note data is so short, we can just keep it here :) */
 const char* bass_input = "BBNNDDPPAAMMFFRR??KKDDPP==II==II";
 const char* lead_input = "hhjjdeeadca\0aaccd\0dcacehjehceacaeehhjehceadedcacddacehcdcaccaacchhjjdeeadca\0aaccd\0dcacehjehceacaeehhjehceadedcacddacehcdcacca\0a\0aa\\^aa\\^aceafefha\0aa\\^a\\feca\\YZ\\aa\\^aa\\^aacea\\^\\a\0a`a\\^afefhaa``aa\\^aa\\^aceafefha\0aa\\^a\\feca\\YZ\\aa\\^aa\\^aacea\\^\\a\0a`a\\^afefhaacc";
 
 
 short render_sample(void){
-    sample = u<lead[v]*0.5f?10000:-10000;
-    sample += u_2<bass[v_2]*0.5f?10000:-10000;
+    //two lines were faster than one
+    sample = lead_period_tracker<lead[lead_note_tracker]*0.5f?10000:-10000;
+    sample += bass_period_tracker<bass[bass_note_tracker]*0.5f?10000:-10000;
     t++;
-    u++;
-    u_2++;
+    lead_period_tracker++;
+    bass_period_tracker++;
     if(t>TICK_LENGTH){
         t=1;
-        v++;
-        v_2++;
+        lead_note_tracker++;
+        bass_note_tracker++;
     }
-    if(v>LEAD_LENGTH-1){
-        v = 0;
+    /* if we reack the end of the track, repeat */
+    if(lead_note_tracker >  LEAD_LENGTH-1){
+        lead_note_tracker = 0;
     }
-    if(v_2>BASS_LENGTH-1){
-        v_2 = 0;
+    if(bass_note_tracker > BASS_LENGTH-1){
+        bass_note_tracker = 0;
     }
-    if(u>lead[v]){
-        u=0;
+
+    /* if we reach the end of period designated by the lead and bass frequency tables, repeat */
+    if(lead_period_tracker > lead[lead_note_tracker]){
+        lead_period_tracker = 0;
     }
-    if(u_2>bass[v_2]){
-        u_2=0;
+    if(bass_period_tracker > bass[bass_note_tracker]){
+        bass_period_tracker = 0;
     }
     return sample;
 }
 
 int main (int argc, char *argv[]) {
     int i;
-	for(i=0;i<1024;i++) {	
+    /* pre-render some tables */
+	for(i=0;i<1024;i++) { //a sine table
 		sin_tab[i] = sin(M_PI/1024*i)*10000;
 	}	
-    for(i=0;i<LEAD_LENGTH;i++){
-        lead[i] = 20000.f/(440*pow(2,(lead_input[i]-112)/12.f));
+    for(i=0;i<LEAD_LENGTH;i++){ //the frequency table for the lead voice
+        lead[i] = 12000.f/(440*pow(2,(lead_input[i]-112)/12.f));
     }
-    for(i=0;i<BASS_LENGTH;i++){
-        bass[i] = 20000.f/(440*pow(2,(bass_input[i]-112)/12.f));
+    for(i=0;i<BASS_LENGTH;i++){ //the frequency table for the bass voice
+        bass[i] = 12000.f/(440*pow(2,(bass_input[i]-112)/12.f));
     }
-    initHardware();
-    selected = -1;
+    activate_sound(SND_SILENCE); //silence from the start
     last_known_button_state = 0x00;		
+    initHardware(); //init the hardware as late as possible
     while(1);
     return 0;
 }
 
-/* funksjon for å initialisere maskinvaren, må utvides */
 void initHardware (void) {
     initIntc();
     initLeds();
@@ -92,19 +100,22 @@ void initIntc(void) {
 }
 
 void initButtons(void) {
-    piob->per |= 0xFF;
-    piob->puer |= 0xFF;
-    piob->ier |= 0xFF;
-    register_interrupt(button_isr, AVR32_PIOB_IRQ/32, AVR32_PIOB_IRQ % 32, BUTTONS_INT_LEVEL);
-    init_interrupts();  //søk på 4 40 scale
+    pioc->per |= 0xFF;
+    pioc->puer |= 0xFF;
+    pioc->ier |= 0xFF;
+
+    register_interrupt(button_isr, AVR32_PIOC_IRQ/32, AVR32_PIOC_IRQ % 32, BUTTONS_INT_LEVEL);
+    init_interrupts();
 }
 
 void initLeds(void) {
-    pioc->per = 0xFF;
-    pioc->oer = 0xFF;
+    piob->per = 0xFF;
+    piob->oer = 0xFF;
 }
 
+
 void initAudio(void) {
+
     register_interrupt( abdac_isr, AVR32_ABDAC_IRQ/32, AVR32_ABDAC_IRQ % 32, ABDAC_INT_LEVEL);
 
     piob->PDR.p20 = 1;
@@ -115,103 +126,83 @@ void initAudio(void) {
 
     pm->GCCTRL[6].diven = 0;
     pm->GCCTRL[6].pllsel = 0;
-    pm->GCCTRL[6].oscsel = 1;
+    pm->GCCTRL[6].oscsel = 0;
     pm->GCCTRL[6].cen = 1;
 
     abdac->CR.en = 1;
     abdac->IER.tx_ready = 1;
 }
 
+
 void activate_sound(int sound){
-    abdac->CR.en = 1;
     volume = 1.0f;
-    t = 20000;
-    if(sound == 4){ //special case for music
-       t = 1; 
-       v = 0;
-       v_2 = 0;
-       u = 0;
-       u_2 = 0;
-    }
     selected = sound;
-    pioc->codr = 0xFF; //clear leds
-    if(sound != -1){
-        pioc->sodr = pow(2,selected);
+    piob->codr = 0xFF; //clear leds
+    if(sound != SND_SILENCE){
+        piob->sodr = pow(2,selected); //set the active led
     }else{
-        abdac->CR.en = 0;
+        t=0;
     }
 }
 
 void button_isr(void) {
-    pioc->codr = 0xFF; //clear leds
-    piob->isr; //reset interupt
+    pioc->isr; //reset interupt
+    piob->codr = 0xFF; //clear leds
 
 
-    int button_state = piob->pdsr;
-    button_state = button_state^0xFF;
+    int button_state = pioc->pdsr;
+    button_state = ~button_state;
     int button_pushed = last_known_button_state^button_state;
     button_pushed = button_pushed&button_state;
     last_known_button_state = button_state;
 
 	switch(button_pushed){
-		case 0x01:
-			activate_sound(0);
+		case SW0:
+            t = 20000;
+			activate_sound(SND_COIN);
 			break;
-		case 0x02:
-			activate_sound(1);
+		case SW1:
+            t = 20000;
+			activate_sound(SND_MACHINEGUN);
 			break;
-		case 0x04:
-			activate_sound(2);
+		case SW2:
+            t = 20000;
+			activate_sound(SND_POWERUP);
 			break;
-		case 0x08:
-			activate_sound(3);
+		case SW3:
+            t = 20000;
+			activate_sound(SND_NOISE);
 			break;
-		case 0x10:
-			activate_sound(4);
+		case SW4:
+            t = 1; 
+            lead_period_tracker = 0;
+            bass_period_tracker = 0;
+            lead_note_tracker= 0;
+            bass_note_tracker = 0;
+            activate_sound(SND_NYAN);
+            break;
+        case SW5:
+            t = 20000;
+			activate_sound(SND_MONSTER);
 			break;
-		case 0x20:
-			activate_sound(5);
-			break;
-		case 0x40:
+		case SW6:
 			t=60000;
-			activate_sound(6);
+			activate_sound(SND_GAME_OVER);
 			break;
-		case 0x80:
+		case SW7:
 			t=50000;
-			activate_sound(7);
+			activate_sound(SND_DEATH);
 			break;
 	}
-    pioc->sodr = pow(2,selected);
+    piob->sodr = pow(2,selected);
     return ;
 }
 
 void abdac_isr(void) {
-    switch(selected){
-        case 0:
-            sound0();
-            break;
-        case 1:
-            sound1();
-            break;
-        case 2:
-            sound2();
-            break;
-        case 4:
-            sound4();
-            break;
-        case 6:
-            sound6();
-            break;
-        case 7:
-            sound7();
-            break;
-        case 3:
-        case 5:
-        default:
-            silence();
+    (*sounds[selected])();
+    if(!t){
+        activate_sound(SND_SILENCE);
     }
-    if(!t)activate_sound(-1);
-    abdac->isr;
     return;
 }
 
@@ -239,17 +230,24 @@ void sound2(void){
     return ;
 }
 void sound3(void){
-
+    abdac->SDR.channel0 = rand();
+    abdac->SDR.channel1 = rand();
+    t--;
     return ;
 }
 void sound4(void){
     short sample = render_sample();
-    abdac->SDR.channel0 = render_sample();
-    abdac->SDR.channel1 = render_sample();
+    abdac->SDR.channel0 = sample;
+    abdac->SDR.channel1 = sample;
     return ;
 }
 void sound5(void){
-
+    int bouncer1 = ((60000-t)/(8+(60000-t)/300)%2)*2-1;
+    int bouncer2 = ((60000-t)/(64+t/6000)%4)*2-1;
+    short sample = bouncer1*4000 + bouncer2*4000;
+    abdac->SDR.channel0 = sample;
+    abdac->SDR.channel1 = sample;
+    t--;
     return ;
 }
 void sound6(void){
@@ -269,9 +267,6 @@ void sound7(void){
 	t--;	
     return ;
 }
-
 void silence(void){
-    abdac->SDR.channel0 = 0;
-    abdac->SDR.channel1 = 0;
-    return ;
+    return;
 }
